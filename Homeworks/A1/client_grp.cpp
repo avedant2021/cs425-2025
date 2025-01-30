@@ -1,12 +1,9 @@
-// Client-side implementation in C++ for a chat server with private messages and group messaging
-
 #include <iostream>
 #include <string>
 #include <thread>
 #include <mutex>
 #include <unordered_map>
 #include <unordered_set>
-#include <vector>
 #include <sstream>
 #include <cstring>
 #include <cstdlib>
@@ -17,6 +14,7 @@
 
 std::mutex cout_mutex;
 
+// Function to handle receiving messages from the server in a separate thread
 void handle_server_messages(int server_socket) {
     char buffer[BUFFER_SIZE];
     while (true) {
@@ -31,6 +29,16 @@ void handle_server_messages(int server_socket) {
         std::lock_guard<std::mutex> lock(cout_mutex);
         std::cout << buffer << std::endl;
     }
+}
+
+// Function to send messages to the server
+void send_message(int server_socket, const std::string& message) {
+    send(server_socket, message.c_str(), message.size(), 0);
+}
+
+// Helper function to check if a string starts with a given prefix
+bool starts_with(const std::string& str, const std::string& prefix) {
+    return str.rfind(prefix, 0) == 0;
 }
 
 int main() {
@@ -59,22 +67,20 @@ int main() {
     char buffer[BUFFER_SIZE];
 
     memset(buffer, 0, BUFFER_SIZE);
-    recv(client_socket, buffer, BUFFER_SIZE, 0); // Receive the message "Enter the user name" for the server
-    // You should have a line like this in the server.cpp code: send_message(client_socket, "Enter username: ");
- 
+    recv(client_socket, buffer, BUFFER_SIZE, 0); // Receive the message "Enter the user name" from the server
     std::cout << buffer;
     std::getline(std::cin, username);
     send(client_socket, username.c_str(), username.size(), 0);
 
     memset(buffer, 0, BUFFER_SIZE);
-    recv(client_socket, buffer, BUFFER_SIZE, 0); // Receive the message "Enter the password" for the server
+    recv(client_socket, buffer, BUFFER_SIZE, 0); // Receive the message "Enter the password" from the server
     std::cout << buffer;
     std::getline(std::cin, password);
     send(client_socket, password.c_str(), password.size(), 0);
 
     memset(buffer, 0, BUFFER_SIZE);
     // Depending on whether the authentication passes or not, receive the message "Authentication Failed" or "Welcome to the server"
-    recv(client_socket, buffer, BUFFER_SIZE, 0); 
+    recv(client_socket, buffer, BUFFER_SIZE, 0);
     std::cout << buffer << std::endl;
 
     if (std::string(buffer).find("Authentication failed") != std::string::npos) {
@@ -82,10 +88,9 @@ int main() {
         return 1;
     }
 
-    // Start thread for receiving messages from server
+    // Start a background thread for receiving messages from the server
     std::thread receive_thread(handle_server_messages, client_socket);
-    // We use detach because we want this thread to run in the background while the main thread continues running
-    receive_thread.detach();
+    receive_thread.detach(); // Detach the thread so it runs in the background
 
     // Send messages to the server
     while (true) {
@@ -94,11 +99,46 @@ int main() {
 
         if (message.empty()) continue;
 
-        send(client_socket, message.c_str(), message.size(), 0);
-
-        if (message == "/exit") {
+        // Check if message is a special command
+        if (starts_with(message, "/broadcast ")) {
+            send_message(client_socket, message);  // Send broadcast message
+        }
+        else if (starts_with(message, "/msg ")) {
+            // Ensure proper format for private message
+            std::stringstream ss(message.substr(5));  // Remove "/msg " prefix
+            std::string target_user;
+            std::string msg_content;
+            
+            ss >> target_user;
+            std::getline(ss, msg_content);
+            
+            if (target_user.empty() || msg_content.empty()) {
+                std::cout << "Invalid /msg format. Usage: /msg <username> <message>" << std::endl;
+            } else {
+                // Construct the message and send it
+                std::string full_message = "/msg " + target_user + " " + msg_content;
+                send_message(client_socket, full_message);
+            }
+        }
+        else if (starts_with(message, "/group msg ")) {
+            send_message(client_socket, message);  // Send group message
+        }
+        else if (starts_with(message, "/create group ")) {
+            send_message(client_socket, message);  // Create group
+        }
+        else if (starts_with(message, "/join group ")) {
+            send_message(client_socket, message);  // Join group
+        }
+        else if (starts_with(message, "/leave group ")) {
+            send_message(client_socket, message);  // Leave group
+        }
+        else if (message == "/exit") {
+            send_message(client_socket, message);  // Exit the chat
             close(client_socket);
             break;
+        } else {
+            // Regular message (for private or group messages)
+            send_message(client_socket, message);
         }
     }
 
